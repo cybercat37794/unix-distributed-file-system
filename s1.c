@@ -445,7 +445,8 @@ int download_tar(int client_sock, char *filetype) {
 int display_filenames(int client_sock, char *pathname) {
     // Get the corresponding path in S1
     char s1_path[MAX_PATH_LEN];
-    snprintf(s1_path, MAX_PATH_LEN, "%s/S1%s", getenv("HOME"), pathname + 3); // +3 to skip "~S1"
+    snprintf(s1_path, MAX_PATH_LEN, "%s/S1%s", getenv("HOME"), 
+             (strcmp(pathname, "~S1") == 0) ? "" : (pathname + 3)); // Handle root case
     
     // Check if path exists and is a directory
     struct stat st;
@@ -454,28 +455,49 @@ int display_filenames(int client_sock, char *pathname) {
         return -1;
     }
     
-    // Get files from S1 (.c files)
+    // Get files from S1 (.c files) recursively
+    char file_list[BUFFER_SIZE] = {0};
     DIR *dir;
     struct dirent *ent;
-    char file_list[BUFFER_SIZE] = {0};
     
-    if ((dir = opendir(s1_path)) != NULL) {
-        while ((ent = readdir(dir)) != NULL) {
-            if (ent->d_type == DT_REG) {
-                char *ext = strrchr(ent->d_name, '.');
+    // Function to recursively list files
+    void list_files_recursive(const char *base_path) {
+        char path[MAX_PATH_LEN];
+        struct dirent *dp;
+        DIR *dir = opendir(base_path);
+        
+        if (!dir) return;
+        
+        while ((dp = readdir(dir)) != NULL) {
+            if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
+                continue;
+                
+            snprintf(path, MAX_PATH_LEN, "%s/%s", base_path, dp->d_name);
+            
+            if (dp->d_type == DT_REG) {
+                char *ext = strrchr(dp->d_name, '.');
                 if (ext && strcmp(ext, ".c") == 0) {
-                    strncat(file_list, ent->d_name, BUFFER_SIZE - strlen(file_list) - 1);
+                    // Get relative path from S1 root
+                    char relative_path[MAX_PATH_LEN];
+                    snprintf(relative_path, MAX_PATH_LEN, "%s%s", 
+                            pathname, path + strlen(s1_path));
+                    
+                    strncat(file_list, relative_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);
                 }
+            }
+            else if (dp->d_type == DT_DIR) {
+                list_files_recursive(path);
             }
         }
         closedir(dir);
     }
     
+    list_files_recursive(s1_path);
+    
     // Get files from other servers
     char command[MAX_PATH_LEN];
     snprintf(command, MAX_PATH_LEN, "dispfnames %s", pathname);
-    
     char response[BUFFER_SIZE];
     
     // Get PDF files from S2
@@ -497,7 +519,6 @@ int display_filenames(int client_sock, char *pathname) {
     write(client_sock, file_list, strlen(file_list));
     return 0;
 }
-
 int send_to_server(int port, char *command, char *response) {
     int sockfd;
     struct sockaddr_in serv_addr;
