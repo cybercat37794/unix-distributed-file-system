@@ -403,36 +403,47 @@ int send_file(int sockfd, char *filename) {
     close(fd);
     return 0;
 }
-
 int receive_file(int sockfd, char *filename) {
     int fd;
     char buffer[BUFFER_SIZE];
     ssize_t n;
-    
+
+    // Peek into the socket to check if response starts with "ERROR"
+    char peek_buf[6] = {0}; // 5 + null terminator
+    n = recv(sockfd, peek_buf, 5, MSG_PEEK);  // Look at first 5 bytes without removing them from buffer
+
+    if (n <= 0) {
+        printf("ERROR: Failed to read from socket\n");
+        return -1;
+    }
+
+    if (strncmp(peek_buf, "ERROR", 5) == 0) {
+        // Read full error message now
+        char error_msg[BUFFER_SIZE] = {0};
+        read(sockfd, error_msg, BUFFER_SIZE - 1);
+        printf("%s\n", error_msg);
+        return -1;
+    }
+
     // Read file size
     off_t file_size;
-    if (read(sockfd, &file_size, sizeof(off_t)) < 0) {
-        error("ERROR reading file size from socket");
+    if (read(sockfd, &file_size, sizeof(off_t)) != sizeof(off_t)) {
+        printf("ERROR: Failed to read file size\n");
         return -1;
     }
-    
+
     if (file_size <= 0) {
-        char error_msg[BUFFER_SIZE];
-        if (read(sockfd, error_msg, BUFFER_SIZE - 1) < 0) {
-            error("ERROR reading from socket");
-        } else {
-            printf("%s\n", error_msg);
-        }
+        printf("ERROR: Invalid file size received: %ld\n", (long)file_size);
         return -1;
     }
-    
+
     // Create file
     fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         printf("ERROR: Failed to create file '%s'\n", filename);
         return -1;
     }
-    
+
     // Receive file data
     off_t remaining = file_size;
     while (remaining > 0) {
@@ -440,20 +451,20 @@ int receive_file(int sockfd, char *filename) {
         if (n <= 0) {
             printf("ERROR: File transfer failed\n");
             close(fd);
-            unlink(filename);
+            unlink(filename);  // Delete partially written file
             return -1;
         }
-        
+
         if (write(fd, buffer, n) < 0) {
             printf("ERROR: Failed to write to file\n");
             close(fd);
             unlink(filename);
             return -1;
         }
-        
+
         remaining -= n;
     }
-    
+
     close(fd);
     return 0;
 }

@@ -260,7 +260,11 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
 int download_file(int client_sock, char *filename) {
     // Check if file exists in S1
     char s1_path[MAX_PATH_LEN];
-    snprintf(s1_path, MAX_PATH_LEN, "%s/S1%s", getenv("HOME"), filename + 3); // +3 to skip "~S1"
+    snprintf(s1_path, MAX_PATH_LEN, "%s/S1/%s", getenv("HOME"), filename + 4);
+
+	// Debug print
+	printf("DEBUG: Resolved S1 file path: %s\n", s1_path);
+
     
     struct stat st;
     if (stat(s1_path, &st) == 0) {
