@@ -381,144 +381,200 @@ int download_tar(int client_sock, char *filetype) {
         // Handle .c files in S1
         char s1_dir[MAX_PATH_LEN];
         snprintf(s1_dir, MAX_PATH_LEN, "%s/S1", getenv("HOME"));
-        
-        // Create tar file
-        char tar_cmd[MAX_PATH_LEN + 50];
-        snprintf(tar_cmd, MAX_PATH_LEN + 50, "tar -cf /tmp/cfiles.tar -C %s . --transform='s|.*/||' --wildcards '*.c'", s1_dir);
-        
-        if (system(tar_cmd) != 0) {
-            write(client_sock, "ERROR: Failed to create tar file", 30);
+
+        // Find all .c files recursively and tar them
+        char find_cmd[MAX_PATH_LEN * 2];
+        snprintf(find_cmd, sizeof(find_cmd),
+                 "find %s -type f -name \"*.c\" | tar -cf /tmp/cfiles.tar -T -", s1_dir);
+
+        if (system(find_cmd) != 0) {
+            write(client_sock, "ERROR: Failed to create tar file", 32);
             return -1;
         }
-        
+
         // Send tar file to client
         struct stat st;
         if (stat("/tmp/cfiles.tar", &st) != 0) {
-            write(client_sock, "ERROR: Tar file not found", 24);
+            write(client_sock, "ERROR: Tar file not found", 25);
             return -1;
         }
-        
+
         int fd = open("/tmp/cfiles.tar", O_RDONLY);
         if (fd < 0) {
-            write(client_sock, "ERROR: Failed to open tar file", 29);
+            write(client_sock, "ERROR: Failed to open tar file", 30);
             return -1;
         }
-        
+
         // Send file size
         write(client_sock, &st.st_size, sizeof(off_t));
-        
+
         // Send file data
         off_t remaining = st.st_size;
         while (remaining > 0) {
             ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
             if (sent <= 0) {
                 close(fd);
-                write(client_sock, "ERROR: File transfer failed", 27);
+                write(client_sock, "ERROR: File transfer failed", 28);
                 return -1;
             }
             remaining -= sent;
         }
         close(fd);
-        
+
         // Clean up
         unlink("/tmp/cfiles.tar");
-        
         return 0;
+
     } else if (strcmp(filetype, ".pdf") == 0 || strcmp(filetype, ".txt") == 0) {
         // Handle .pdf and .txt files from other servers
         int target_port = (strcmp(filetype, ".pdf") == 0) ? S2_PORT : S3_PORT;
-        
+
         char command[BUFFER_SIZE];
         snprintf(command, BUFFER_SIZE, "downltar %s", filetype);
-        
-        char response[BUFFER_SIZE];
-        if (send_to_server(target_port, command, response) < 0) {
-            write(client_sock, "ERROR: Failed to get tar file from target server", 46);
+
+        int sockfd;
+        struct sockaddr_in serv_addr;
+        struct hostent *server;
+
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            write(client_sock, "ERROR: Socket creation failed", 29);
             return -1;
         }
-        
-        // Forward the response (tar file data) to client
-        write(client_sock, response, strlen(response));
+
+        server = gethostbyname("localhost");
+        if (server == NULL) {
+            close(sockfd);
+            write(client_sock, "ERROR: Host resolution failed", 29);
+            return -1;
+        }
+
+        bzero((char *)&serv_addr, sizeof(serv_addr));
+        serv_addr.sin_family = AF_INET;
+        bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
+        serv_addr.sin_port = htons(target_port);
+
+        if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            close(sockfd);
+            write(client_sock, "ERROR: Connection to server failed", 34);
+            return -1;
+        }
+
+        // Send command to target server
+        if (write(sockfd, command, strlen(command)) < 0) {
+            close(sockfd);
+            write(client_sock, "ERROR: Command send failed", 26);
+            return -1;
+        }
+
+        // Read tar file size
+        off_t filesize;
+        if (read(sockfd, &filesize, sizeof(off_t)) != sizeof(off_t)) {
+            close(sockfd);
+            write(client_sock, "ERROR: Failed to read file size", 31);
+            return -1;
+        }
+
+        // Send file size to client
+        write(client_sock, &filesize, sizeof(off_t));
+
+        // Relay tar file content from target server to client
+        off_t remaining = filesize;
+        char buffer[1024];
+        while (remaining > 0) {
+            ssize_t bytes_read = read(sockfd, buffer, sizeof(buffer));
+            if (bytes_read <= 0) break;
+            write(client_sock, buffer, bytes_read);
+            remaining -= bytes_read;
+        }
+
+        close(sockfd);
         return 0;
     } else {
-        write(client_sock, "ERROR: Unsupported file type for tar", 35);
+        write(client_sock, "ERROR: Unsupported file type for tar", 36);
         return -1;
     }
 }
+
 
 int display_filenames(int client_sock, char *pathname) {
     // Get the corresponding path in S1
     char s1_path[MAX_PATH_LEN];
     snprintf(s1_path, MAX_PATH_LEN, "%s/S1%s", getenv("HOME"), 
              (strcmp(pathname, "~S1") == 0) ? "" : (pathname + 3)); // Handle root case
-    
+
     // Check if path exists and is a directory
     struct stat st;
     if (stat(s1_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
         write(client_sock, "ERROR: Invalid directory path", 29);
         return -1;
     }
-    
+
     // Get files from S1 (.c files) recursively
     char file_list[BUFFER_SIZE] = {0};
     DIR *dir;
     struct dirent *ent;
-    
+
     // Function to recursively list files
-    void list_files_recursive(const char *base_path) {
+    void list_files_recursive(const char *base_path, const char *relative_path) {
         char path[MAX_PATH_LEN];
         struct dirent *dp;
         DIR *dir = opendir(base_path);
-        
+
         if (!dir) return;
-        
+
         while ((dp = readdir(dir)) != NULL) {
             if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
                 continue;
-                
+
             snprintf(path, MAX_PATH_LEN, "%s/%s", base_path, dp->d_name);
-            
+
+            char new_relative_path[MAX_PATH_LEN];
+            if (strcmp(relative_path, "") == 0) {
+                snprintf(new_relative_path, sizeof(new_relative_path), "%s", dp->d_name);
+            } else {
+                snprintf(new_relative_path, sizeof(new_relative_path), "%s/%s", relative_path, dp->d_name);
+            }
+
             if (dp->d_type == DT_REG) {
                 char *ext = strrchr(dp->d_name, '.');
                 if (ext && strcmp(ext, ".c") == 0) {
-                    // Get relative path from S1 root
-                    char relative_path[MAX_PATH_LEN];
-                    snprintf(relative_path, MAX_PATH_LEN, "%s%s", 
-                            pathname, path + strlen(s1_path));
-                    
-                    strncat(file_list, relative_path, BUFFER_SIZE - strlen(file_list) - 1);
+                    // Build ~S1-style path
+                    char output_path[MAX_PATH_LEN];
+                    snprintf(output_path, sizeof(output_path), "~S1/%s", new_relative_path);
+                    strncat(file_list, output_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);
                 }
-            }
-            else if (dp->d_type == DT_DIR) {
-                list_files_recursive(path);
+            } else if (dp->d_type == DT_DIR) {
+                list_files_recursive(path, new_relative_path);
             }
         }
         closedir(dir);
     }
-    
-    list_files_recursive(s1_path);
-    
+
+    // Start recursive traversal from the base path
+    list_files_recursive(s1_path, "");
+
     // Get files from other servers
     char command[MAX_PATH_LEN];
     snprintf(command, MAX_PATH_LEN, "dispfnames %s", pathname);
     char response[BUFFER_SIZE];
-    
+
     // Get PDF files from S2
     if (send_to_server(S2_PORT, command, response) == 0) {
         strncat(file_list, response, BUFFER_SIZE - strlen(file_list) - 1);
     }
-    
+
     // Get TXT files from S3
     if (send_to_server(S3_PORT, command, response) == 0) {
         strncat(file_list, response, BUFFER_SIZE - strlen(file_list) - 1);
     }
-    
+
     // Get ZIP files from S4
     if (send_to_server(S4_PORT, command, response) == 0) {
         strncat(file_list, response, BUFFER_SIZE - strlen(file_list) - 1);
     }
-    
+
     // Send the combined list to client
     write(client_sock, file_list, strlen(file_list));
     return 0;

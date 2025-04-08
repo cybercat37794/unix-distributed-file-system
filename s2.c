@@ -249,8 +249,10 @@ int download_tar(int client_sock) {
     
     // Create tar file
     char tar_cmd[MAX_PATH_LEN + 50];
-    snprintf(tar_cmd, MAX_PATH_LEN + 50, "tar -cf /tmp/pdfiles.tar -C %s . --transform='s|.*/||' --wildcards '*.pdf'", s2_dir);
-    
+    // snprintf(tar_cmd, MAX_PATH_LEN + 50, "tar -cf /tmp/pdfiles.tar -C %s . --transform='s|.*/||' --wildcards '*.pdf'", s2_dir);
+    snprintf(tar_cmd, sizeof(tar_cmd),
+         "find %s -type f -name \"*.pdf\" | tar -cf /tmp/pdfiles.tar -T -", s2_dir);
+
     if (system(tar_cmd) != 0) {
         write(client_sock, "ERROR: Failed to create tar file", 30);
         return -1;
@@ -335,8 +337,11 @@ int display_filenames(int client_sock, char *pathname) {
                 if (ext && strcmp(ext, ".pdf") == 0) {
                     // Convert to ~S1-style path
                     char output_path[MAX_PATH_LEN];
-                    snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
-                            pathname + 2, new_relative_path); // +2 to skip "~S"
+                    // snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
+                            // pathname + 2, new_relative_path); // +2 to skip "~S"
+							
+					snprintf(output_path, sizeof(output_path), "~S1/%s", new_relative_path);
+
                     
                     strncat(file_list, output_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);

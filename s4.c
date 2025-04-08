@@ -284,8 +284,10 @@ int display_filenames(int client_sock, char *pathname) {
                 if (ext && strcmp(ext, ".zip") == 0) {
                     // Convert to ~S1-style path
                     char output_path[MAX_PATH_LEN];
-                    snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
-                            pathname + 2, new_relative_path); // +2 to skip "~S"
+                    // snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
+                            // pathname + 2, new_relative_path); // +2 to skip "~S"
+					snprintf(output_path, sizeof(output_path), "~S1/%s", new_relative_path);
+
                     
                     strncat(file_list, output_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);
