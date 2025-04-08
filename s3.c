@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <sys/sendfile.h>
 #include <time.h>
+#include <errno.h>
 
 #define PORT 4309
 #define MAX_CLIENTS 5

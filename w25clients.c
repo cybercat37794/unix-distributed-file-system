@@ -68,7 +68,8 @@ int main() {
         // Parse command
         char *cmd = strtok(buffer, " ");
         
-        if (strcmp(cmd, "uploadf") == 0) {
+        //task 1 
+		if (strcmp(cmd, "uploadf") == 0) {
             char *filename = strtok(NULL, " ");
             char *dest_path = strtok(NULL, " ");
             if (filename == NULL || dest_path == NULL) {
@@ -78,7 +79,8 @@ int main() {
             }
             handle_uploadf(sockfd, filename, dest_path);
         } 
-        else if (strcmp(cmd, "downlf") == 0) {
+        //task 2
+		else if (strcmp(cmd, "downlf") == 0) {
             char *filename = strtok(NULL, " ");
             if (filename == NULL) {
                 printf("Invalid command format. Usage: downlf <filename>\n");
@@ -86,7 +88,8 @@ int main() {
                 continue;
             }
             handle_downlf(sockfd, filename);
-        } 
+        }
+		// task 3
         else if (strcmp(cmd, "removef") == 0) {
             char *filename = strtok(NULL, " ");
             if (filename == NULL) {
@@ -96,6 +99,7 @@ int main() {
             }
             handle_removef(sockfd, filename);
         } 
+		// task 4
         else if (strcmp(cmd, "downltar") == 0) {
             char *filetype = strtok(NULL, " ");
             if (filetype == NULL) {
@@ -104,7 +108,8 @@ int main() {
                 continue;
             }
             handle_downltar(sockfd, filetype);
-        } 
+        }
+		// task 5
         else if (strcmp(cmd, "dispfnames") == 0) {
             char *pathname = strtok(NULL, " ");
             if (pathname == NULL) {
