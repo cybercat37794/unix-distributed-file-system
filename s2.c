@@ -294,7 +294,8 @@ int download_tar(int client_sock) {
 int display_filenames(int client_sock, char *pathname) {
     // Get the corresponding path in S2
     char s2_path[MAX_PATH_LEN];
-    snprintf(s2_path, MAX_PATH_LEN, "%s/S2%s", getenv("HOME"), pathname + 3); // +3 to skip "~S1"
+    snprintf(s2_path, MAX_PATH_LEN, "%s/S2%s", getenv("HOME"), 
+             (strcmp(pathname, "~S1") == 0) ? "" : (pathname + 3)); // Handle root case
     
     // Check if path exists and is a directory
     struct stat st;
@@ -303,23 +304,53 @@ int display_filenames(int client_sock, char *pathname) {
         return 0;
     }
     
-    // Get PDF files from S2
-    DIR *dir;
-    struct dirent *ent;
+    // Get PDF files from S2 recursively
     char file_list[BUFFER_SIZE] = {0};
     
-    if ((dir = opendir(s2_path)) != NULL) {
+    // Recursive directory traversal function
+    void list_pdf_files(const char *base_path, const char *relative_path) {
+        DIR *dir = opendir(base_path);
+        if (!dir) return;
+        
+        struct dirent *ent;
         while ((ent = readdir(dir)) != NULL) {
+            // Skip . and .. directories
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+                continue;
+            }
+            
+            char full_path[MAX_PATH_LEN];
+            snprintf(full_path, sizeof(full_path), "%s/%s", base_path, ent->d_name);
+            
+            char new_relative_path[MAX_PATH_LEN];
+            if (strcmp(relative_path, "") == 0) {
+                snprintf(new_relative_path, sizeof(new_relative_path), "%s", ent->d_name);
+            } else {
+                snprintf(new_relative_path, sizeof(new_relative_path), "%s/%s", relative_path, ent->d_name);
+            }
+            
             if (ent->d_type == DT_REG) {
+                // Check if it's a PDF file
                 char *ext = strrchr(ent->d_name, '.');
                 if (ext && strcmp(ext, ".pdf") == 0) {
-                    strncat(file_list, ent->d_name, BUFFER_SIZE - strlen(file_list) - 1);
+                    // Convert to ~S1-style path
+                    char output_path[MAX_PATH_LEN];
+                    snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
+                            pathname + 2, new_relative_path); // +2 to skip "~S"
+                    
+                    strncat(file_list, output_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);
                 }
+            } else if (ent->d_type == DT_DIR) {
+                // Recursively process subdirectory
+                list_pdf_files(full_path, new_relative_path);
             }
         }
         closedir(dir);
     }
+    
+    // Start recursive traversal from the base path
+    list_pdf_files(s2_path, "");
     
     // Send the list to S1
     write(client_sock, file_list, strlen(file_list));
