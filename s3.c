@@ -1,4 +1,7 @@
-// Distributed File System - S3 Server Implementation (TXT Files)
+// Distributed File System - S3 Server Implementation
+// This file implements the server (S3) which handles TXT files.
+// S3 receives commands from S1 and processes them accordingly.
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +35,10 @@ int display_filenames(int client_sock, char *pathname);
 int create_directory_tree(char *path);
 void error(const char *msg);
 
-int main() {
+// Main function initializes the server and listens for connections from S1.
+// It creates a child process for each connection to handle requests concurrently.
+int main() 
+{
     int sockfd, newsockfd;
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
@@ -40,7 +46,8 @@ int main() {
 
     // Create socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
+    if (sockfd < 0) 
+    {
         error("ERROR opening socket");
     }
 
@@ -51,7 +58,8 @@ int main() {
     serv_addr.sin_port = htons(PORT);
 
     // Bind the host address
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
+    {
         error("ERROR on binding");
     }
 
@@ -61,26 +69,33 @@ int main() {
 
     printf("S3 server (TXT files) started on port %d\n", PORT);
 
-    while (1) {
-        // Accept connection from client (actually from S1)
+    // Main loop to accept connections from S1
+    while (1) 
+    {
+        // Accept connection from S1
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-        if (newsockfd < 0) {
+        if (newsockfd < 0) 
+        {
             error("ERROR on accept");
         }
 
-        // Create child process to handle client
+        // Create child process to handle the connection
         pid = fork();
-        if (pid < 0) {
+        if (pid < 0) 
+        {
             error("ERROR on fork");
         }
 
-        if (pid == 0) {
+        if (pid == 0)
+        {
             // Child process
             close(sockfd);
             handle_client(newsockfd);
             close(newsockfd);
             exit(0);
-        } else {
+        } 
+        else 
+        {
             // Parent process
             close(newsockfd);
             // Clean up zombie processes
@@ -88,18 +103,23 @@ int main() {
         }
     }
 
+    // Close the socket
     close(sockfd);
     return 0;
 }
 
-void handle_client(int client_sock) {
+// Function to handle requests from S1
+// Parses the command received from S1 and calls the appropriate function.
+void handle_client(int client_sock) 
+{
     char buffer[BUFFER_SIZE];
     int n;
     
     // Read command from client (S1)
     bzero(buffer, BUFFER_SIZE);
     n = read(client_sock, buffer, BUFFER_SIZE - 1);
-    if (n < 0) {
+    if (n < 0) 
+    {
         error("ERROR reading from socket");
     }
     
@@ -107,21 +127,27 @@ void handle_client(int client_sock) {
     
     // Parse command
     char *cmd = strtok(buffer, " ");
-    if (cmd == NULL) {
+    if (cmd == NULL) 
+    {
         write(client_sock, "ERROR: Invalid command", 22);
         return;
     }
     
-    if (strcmp(cmd, "uploadf") == 0) {
+    if (strcmp(cmd, "uploadf") == 0) 
+    {
+        // Handle file upload
         char *filename = strtok(NULL, " ");
         char *dest_path = strtok(NULL, " ");
-        if (filename == NULL || dest_path == NULL) {
+        if (filename == NULL || dest_path == NULL) 
+        {
             write(client_sock, "ERROR: Invalid uploadf command format", 36);
             return;
         }
         upload_file(client_sock, filename, dest_path);
     } 
-    else if (strcmp(cmd, "downlf") == 0) {
+    else if (strcmp(cmd, "downlf") == 0) 
+    {
+        // Handle file download
         char *filename = strtok(NULL, " ");
         if (filename == NULL) {
             write(client_sock, "ERROR: Invalid downlf command format", 34);
@@ -129,34 +155,48 @@ void handle_client(int client_sock) {
         }
         download_file(client_sock, filename);
     } 
-    else if (strcmp(cmd, "removef") == 0) {
+    else if (strcmp(cmd, "removef") == 0) 
+    {
+        // Handle file removal
         char *filename = strtok(NULL, " ");
-        if (filename == NULL) {
+        if (filename == NULL) 
+        {
             write(client_sock, "ERROR: Invalid removef command format", 35);
             return;
         }
         remove_file(client_sock, filename);
     } 
-    else if (strcmp(cmd, "downltar") == 0) {
+    else if (strcmp(cmd, "downltar") == 0)
+    {
+        // Handle tar file download
         download_tar(client_sock);
     } 
-    else if (strcmp(cmd, "dispfnames") == 0) {
+    else if (strcmp(cmd, "dispfnames") == 0)
+    {
+        // Handle display filenames request
         char *pathname = strtok(NULL, " ");
-        if (pathname == NULL) {
+        if (pathname == NULL) 
+        {
             write(client_sock, "ERROR: Invalid dispfnames command format", 38);
             return;
         }
         display_filenames(client_sock, pathname);
     } 
-    else {
+    else 
+    {
+        // Handle unknown command
         write(client_sock, "ERROR: Unknown command", 21);
     }
 }
 
-int upload_file(int client_sock, char *filename, char *dest_path) {
+// Function to upload a TXT file to S3
+// Receives the file from S1 and stores it in the appropriate directory.
+int upload_file(int client_sock, char *filename, char *dest_path) 
+{
     // First, check if the file is a TXT file
     char *ext = strrchr(filename, '.');
-    if (ext == NULL || strcmp(ext, ".txt") != 0) {
+    if (ext == NULL || strcmp(ext, ".txt") != 0) 
+    {
         write(client_sock, "ERROR: S3 only handles TXT files", 31);
         return -1;
     }
@@ -166,7 +206,8 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
     snprintf(s3_path, MAX_PATH_LEN, "%s/S3%s", getenv("HOME"), dest_path + 3); // +3 to skip "~S1"
     
     // Create directory tree if needed
-    if (create_directory_tree(s3_path) < 0) {
+    if (create_directory_tree(s3_path) < 0) 
+    {
         write(client_sock, "ERROR: Failed to create directory", 32);
         return -1;
     }
@@ -177,7 +218,8 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
     snprintf(full_path, MAX_PATH_LEN, "%s/%s", s3_path, base_name);
     
     // Rename/move the file from temporary location (sent by S1) to final destination
-    if (rename(filename, full_path) < 0) {
+    if (rename(filename, full_path) < 0) 
+    {
         write(client_sock, "ERROR: Failed to move file to destination", 38);
         return -1;
     }
@@ -186,33 +228,32 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
     return 0;
 }
 
-int download_file(int client_sock, char *filename) {
+// Function to download a TXT file from S3
+// Sends the requested file to S1 if it exists.
+int download_file(int client_sock, char *filename)
+{
     // Check if file exists in S3
     char s3_path[MAX_PATH_LEN];
     snprintf(s3_path, MAX_PATH_LEN, "%s/S3%s", getenv("HOME"), filename + 3); // +3 to skip "~S1"
     
     struct stat st;
-    if (stat(s3_path, &st) != 0) {
+    if (stat(s3_path, &st) != 0) 
+    {
         write(client_sock, "ERROR: TXT file not found in S3", 30);
-        return -1;
-    }
-    
-    // Check if it's really a TXT file
-    char *ext = strrchr(s3_path, '.');
-    if (ext == NULL || strcmp(ext, ".txt") != 0) {
-        write(client_sock, "ERROR: Not a TXT file", 21);
         return -1;
     }
     
     // Open file
     int fd = open(s3_path, O_RDONLY);
-    if (fd < 0) {
+    if (fd < 0) 
+    {
         write(client_sock, "ERROR: Failed to open TXT file", 29);
         return -1;
     }
     
     // Send file size
-    if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t)) {
+    if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t))
+    {
         close(fd);
         write(client_sock, "ERROR: Failed to send file size", 31);
         return -1;
@@ -221,14 +262,17 @@ int download_file(int client_sock, char *filename) {
     // Send file data
     off_t remaining = st.st_size;
     char buffer[BUFFER_SIZE];
-    while (remaining > 0) {
+    while (remaining > 0) 
+    {
         ssize_t n = read(fd, buffer, (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE);
-        if (n <= 0) {
+        if (n <= 0)
+        {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
         }
-        if (write(client_sock, buffer, n) != n) {
+        if (write(client_sock, buffer, n) != n) 
+        {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
@@ -239,12 +283,16 @@ int download_file(int client_sock, char *filename) {
     return 0;
 }
 
-int remove_file(int client_sock, char *filename) {
+// Function to remove a TXT file from S3
+// Deletes the specified file if it exists.
+int remove_file(int client_sock, char *filename)
+{
     // Check if file exists in S3
     char s3_path[MAX_PATH_LEN];
     snprintf(s3_path, MAX_PATH_LEN, "%s/S3%s", getenv("HOME"), filename + 3); // +3 to skip "~S1"
     
-    if (unlink(s3_path) == 0) {
+    if (unlink(s3_path) == 0) 
+    {
         write(client_sock, "SUCCESS: TXT file deleted from S3", 32);
         return 0;
     }
@@ -253,30 +301,35 @@ int remove_file(int client_sock, char *filename) {
     return -1;
 }
 
-int download_tar(int client_sock) {
+// Function to create a tar file containing all TXT files in S3
+// Finds all .txt files and creates a tar archive to send to S1.
+int download_tar(int client_sock) 
+{
     char s3_dir[MAX_PATH_LEN];
     snprintf(s3_dir, MAX_PATH_LEN, "%s/S3", getenv("HOME"));
     
     // Create tar file for .txt files
     char tar_cmd[MAX_PATH_LEN + 50];
-    snprintf(tar_cmd, sizeof(tar_cmd),
-             "find %s -type f -name \"*.txt\" | tar -cf /tmp/txtfiles.tar -T -", s3_dir);
+    snprintf(tar_cmd, sizeof(tar_cmd), "find %s -type f -name \"*.txt\" | tar -cf /tmp/txtfiles.tar -T -", s3_dir);
 
     // Execute the tar command
-    if (system(tar_cmd) != 0) {
+    if (system(tar_cmd) != 0) 
+    {
         write(client_sock, "ERROR: Failed to create tar file", 30);
         return -1;
     }
     
     // Send tar file to client
     struct stat st;
-    if (stat("/tmp/txtfiles.tar", &st) != 0) {
+    if (stat("/tmp/txtfiles.tar", &st) != 0)
+    {
         write(client_sock, "ERROR: Tar file not found", 25);
         return -1;
     }
     
     int fd = open("/tmp/txtfiles.tar", O_RDONLY);
-    if (fd < 0) {
+    if (fd < 0) 
+    {
         write(client_sock, "ERROR: Failed to open tar file", 29);
         return -1;
     }
@@ -286,9 +339,11 @@ int download_tar(int client_sock) {
     
     // Send file data
     off_t remaining = st.st_size;
-    while (remaining > 0) {
+    while (remaining > 0) 
+    {
         ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
-        if (sent <= 0) {
+        if (sent <= 0) 
+        {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
@@ -303,7 +358,10 @@ int download_tar(int client_sock) {
     return 0;
 }
 
-int display_filenames(int client_sock, char *pathname) {
+// Function to display filenames of TXT files in S3
+// Recursively lists all .txt files in the S3 directory.
+int display_filenames(int client_sock, char *pathname)
+{
     // Get the corresponding path in S3
     char s3_path[MAX_PATH_LEN];
     snprintf(s3_path, MAX_PATH_LEN, "%s/S3%s", getenv("HOME"), 
@@ -311,7 +369,8 @@ int display_filenames(int client_sock, char *pathname) {
     
     // Check if path exists and is a directory
     struct stat st;
-    if (stat(s3_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    if (stat(s3_path, &st) != 0 || !S_ISDIR(st.st_mode)) 
+    {
         write(client_sock, "", 0); // Send empty response if directory doesn't exist
         return 0;
     }
@@ -320,14 +379,17 @@ int display_filenames(int client_sock, char *pathname) {
     char file_list[BUFFER_SIZE] = {0};
     
     // Recursive directory traversal function
-    void list_txt_files(const char *base_path, const char *relative_path) {
+    void list_txt_files(const char *base_path, const char *relative_path)
+    {
         DIR *dir = opendir(base_path);
         if (!dir) return;
         
         struct dirent *ent;
-        while ((ent = readdir(dir)) != NULL) {
+        while ((ent = readdir(dir)) != NULL) 
+        {
             // Skip . and .. directories
-            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) 
+            {
                 continue;
             }
             
@@ -335,28 +397,31 @@ int display_filenames(int client_sock, char *pathname) {
             snprintf(full_path, sizeof(full_path), "%s/%s", base_path, ent->d_name);
             
             char new_relative_path[MAX_PATH_LEN];
-            if (strcmp(relative_path, "") == 0) {
+            if (strcmp(relative_path, "") == 0) 
+            {
                 snprintf(new_relative_path, sizeof(new_relative_path), "%s", ent->d_name);
-            } else {
+            } 
+            else 
+            {
                 snprintf(new_relative_path, sizeof(new_relative_path), "%s/%s", relative_path, ent->d_name);
             }
             
-            if (ent->d_type == DT_REG) {
+            if (ent->d_type == DT_REG) 
+            {
                 // Check if it's a TXT file
                 char *ext = strrchr(ent->d_name, '.');
-                if (ext && strcmp(ext, ".txt") == 0) {
+                if (ext && strcmp(ext, ".txt") == 0) 
+                {
                     // Convert to ~S1-style path
                     char output_path[MAX_PATH_LEN];
-                    // snprintf(output_path, sizeof(output_path), "~S1%s/%s", 
-                            // pathname + 2, new_relative_path); // +2 to skip "~S"
-					
-					snprintf(output_path, sizeof(output_path), "~S1/%s", new_relative_path);
+                    snprintf(output_path, sizeof(output_path), "~S1/%s", new_relative_path);
 
                     
                     strncat(file_list, output_path, BUFFER_SIZE - strlen(file_list) - 1);
                     strncat(file_list, "\n", BUFFER_SIZE - strlen(file_list) - 1);
                 }
-            } else if (ent->d_type == DT_DIR) {
+            } else if (ent->d_type == DT_DIR)
+            {
                 // Recursively process subdirectory
                 list_txt_files(full_path, new_relative_path);
             }
@@ -372,23 +437,31 @@ int display_filenames(int client_sock, char *pathname) {
     return 0;
 }
 
-int create_directory_tree(char *path) {
+// Function to create a directory tree for a given path
+// Ensures that all intermediate directories in the path exist.
+int create_directory_tree(char *path) 
+{
     char *p;
     char tmp[MAX_PATH_LEN];
     
     snprintf(tmp, MAX_PATH_LEN, "%s", path);
     
     // Skip leading slash if present
-    if (tmp[0] == '/') {
+    if (tmp[0] == '/')
+    {
         p = tmp + 1;
-    } else {
+    }
+    else 
+    {
         p = tmp;
     }
     
     // Create each directory in the path
-    while ((p = strchr(p, '/'))) {
+    while ((p = strchr(p, '/'))) 
+    {
         *p = '\0';
-        if (mkdir(tmp, 0755) && errno != EEXIST) {
+        if (mkdir(tmp, 0755) && errno != EEXIST) 
+        {
             return -1;
         }
         *p = '/';
@@ -396,14 +469,18 @@ int create_directory_tree(char *path) {
     }
     
     // Create the final directory
-    if (mkdir(tmp, 0755) && errno != EEXIST) {
+    if (mkdir(tmp, 0755) && errno != EEXIST) 
+    {
         return -1;
     }
     
     return 0;
 }
 
-void error(const char *msg) {
+// Function to handle errors
+// Prints the error message and exits the program.
+void error(const char *msg) 
+{
     perror(msg);
     exit(1);
 }
