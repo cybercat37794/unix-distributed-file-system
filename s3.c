@@ -212,18 +212,28 @@ int download_file(int client_sock, char *filename) {
     }
     
     // Send file size
-    write(client_sock, &st.st_size, sizeof(off_t));
+    if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t)) {
+        close(fd);
+        write(client_sock, "ERROR: Failed to send file size", 31);
+        return -1;
+    }
     
     // Send file data
     off_t remaining = st.st_size;
+    char buffer[BUFFER_SIZE];
     while (remaining > 0) {
-        ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
-        if (sent <= 0) {
+        ssize_t n = read(fd, buffer, (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE);
+        if (n <= 0) {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
         }
-        remaining -= sent;
+        if (write(client_sock, buffer, n) != n) {
+            close(fd);
+            write(client_sock, "ERROR: File transfer failed", 27);
+            return -1;
+        }
+        remaining -= n;
     }
     close(fd);
     return 0;
@@ -247,18 +257,18 @@ int download_tar(int client_sock) {
     char s3_dir[MAX_PATH_LEN];
     snprintf(s3_dir, MAX_PATH_LEN, "%s/S3", getenv("HOME"));
     
-    // Create tar file
+    // Create tar file for .txt files
     char tar_cmd[MAX_PATH_LEN + 50];
-    // snprintf(tar_cmd, MAX_PATH_LEN + 50, "tar -cf /tmp/txtfiles.tar -C %s . --transform='s|.*/||' --wildcards '*.txt'", s3_dir);
     snprintf(tar_cmd, sizeof(tar_cmd),
-         "find %s -type f -name \"*.pdf\" | tar -cf /tmp/pdfiles.tar -T -", s3_dir);
+             "find %s -type f -name \"*.txt\" | tar -cf /tmp/txtfiles.tar -T -", s3_dir);
 
+    // Execute the tar command
     if (system(tar_cmd) != 0) {
         write(client_sock, "ERROR: Failed to create tar file", 30);
         return -1;
     }
     
-    // Send tar file to client (actually to S1)
+    // Send tar file to client
     struct stat st;
     if (stat("/tmp/txtfiles.tar", &st) != 0) {
         write(client_sock, "ERROR: Tar file not found", 25);

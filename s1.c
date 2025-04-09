@@ -260,11 +260,7 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
 int download_file(int client_sock, char *filename) {
     // Check if file exists in S1
     char s1_path[MAX_PATH_LEN];
-    snprintf(s1_path, MAX_PATH_LEN, "%s/S1/%s", getenv("HOME"), filename + 4);
-
-	// Debug print
-	printf("DEBUG: Resolved S1 file path: %s\n", s1_path);
-
+    snprintf(s1_path, MAX_PATH_LEN, "%s/S1%s", getenv("HOME"), filename + 3); // +3 to skip "~S1"
     
     struct stat st;
     if (stat(s1_path, &st) == 0) {
@@ -276,30 +272,35 @@ int download_file(int client_sock, char *filename) {
         }
         
         // Send file size
-        write(client_sock, &st.st_size, sizeof(off_t));
+        if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t)) {
+            close(fd);
+            write(client_sock, "ERROR: Failed to send file size", 31);
+            return -1;
+        }
         
         // Send file data
         off_t remaining = st.st_size;
+        char buffer[BUFFER_SIZE];
         while (remaining > 0) {
-            ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
-            if (sent <= 0) {
+            ssize_t n = read(fd, buffer, (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE);
+            if (n <= 0) {
                 close(fd);
                 write(client_sock, "ERROR: File transfer failed", 27);
                 return -1;
             }
-            remaining -= sent;
+            if (write(client_sock, buffer, n) != n) {
+                close(fd);
+                write(client_sock, "ERROR: File transfer failed", 27);
+                return -1;
+            }
+            remaining -= n;
         }
         close(fd);
         return 0;
     }
     
-    // File not in S1 - check other servers based on extension
+    // File not in S1 - forward to appropriate server
     char *ext = strrchr(filename, '.');
-    if (ext == NULL) {
-        write(client_sock, "ERROR: File has no extension", 27);
-        return -1;
-    }
-    
     int target_port = 0;
     if (strcmp(ext, ".pdf") == 0) {
         target_port = S2_PORT;
@@ -308,27 +309,20 @@ int download_file(int client_sock, char *filename) {
     } else if (strcmp(ext, ".zip") == 0) {
         target_port = S4_PORT;
     } else {
-        write(client_sock, "ERROR: File not found", 21);
+        write(client_sock, "ERROR: Unsupported file type", 28);
         return -1;
     }
     
-    // Request file from appropriate server
-    char command[MAX_PATH_LEN];
-    snprintf(command, MAX_PATH_LEN, "downlf %s", filename);
-    
+    // Forward request to target server
+    char command[BUFFER_SIZE];
+    snprintf(command, BUFFER_SIZE, "downlf %s", filename);
     char response[BUFFER_SIZE];
     if (send_to_server(target_port, command, response) < 0) {
         write(client_sock, "ERROR: Failed to retrieve file from target server", 47);
         return -1;
     }
     
-    // Check if response contains file data
-    if (strncmp(response, "ERROR", 5) == 0) {
-        write(client_sock, response, strlen(response));
-        return -1;
-    }
-    
-    // Forward the file data to client
+    // Forward response to client
     write(client_sock, response, strlen(response));
     return 0;
 }

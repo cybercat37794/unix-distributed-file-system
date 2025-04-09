@@ -212,18 +212,28 @@ int download_file(int client_sock, char *filename) {
     }
     
     // Send file size
-    write(client_sock, &st.st_size, sizeof(off_t));
+    if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t)) {
+        close(fd);
+        write(client_sock, "ERROR: Failed to send file size", 31);
+        return -1;
+    }
     
     // Send file data
     off_t remaining = st.st_size;
+    char buffer[BUFFER_SIZE];
     while (remaining > 0) {
-        ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
-        if (sent <= 0) {
+        ssize_t n = read(fd, buffer, (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE);
+        if (n <= 0) {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
         }
-        remaining -= sent;
+        if (write(client_sock, buffer, n) != n) {
+            close(fd);
+            write(client_sock, "ERROR: File transfer failed", 27);
+            return -1;
+        }
+        remaining -= n;
     }
     close(fd);
     return 0;
@@ -247,34 +257,35 @@ int download_tar(int client_sock) {
     char s2_dir[MAX_PATH_LEN];
     snprintf(s2_dir, MAX_PATH_LEN, "%s/S2", getenv("HOME"));
     
-    // Create tar file
+    // Create tar file for .pdf files
     char tar_cmd[MAX_PATH_LEN + 50];
-    // snprintf(tar_cmd, MAX_PATH_LEN + 50, "tar -cf /tmp/pdfiles.tar -C %s . --transform='s|.*/||' --wildcards '*.pdf'", s2_dir);
     snprintf(tar_cmd, sizeof(tar_cmd),
-         "find %s -type f -name \"*.pdf\" | tar -cf /tmp/pdfiles.tar -T -", s2_dir);
+             "find %s -type f -name \"*.pdf\" | tar -cf /tmp/pdffiles.tar -T -", s2_dir);
 
+    // Execute the tar command
     if (system(tar_cmd) != 0) {
-        write(client_sock, "ERROR: Failed to create tar file", 30);
+        write(client_sock, "ERROR: Failed to create tar file", 32);
         return -1;
     }
     
-    // Send tar file to client (actually to S1)
+    // Check if the tar file was created successfully
     struct stat st;
-    if (stat("/tmp/pdfiles.tar", &st) != 0) {
+    if (stat("/tmp/pdffiles.tar", &st) != 0) {
         write(client_sock, "ERROR: Tar file not found", 25);
         return -1;
     }
     
-    int fd = open("/tmp/pdfiles.tar", O_RDONLY);
+    // Open the tar file for reading
+    int fd = open("/tmp/pdffiles.tar", O_RDONLY);
     if (fd < 0) {
-        write(client_sock, "ERROR: Failed to open tar file", 29);
+        write(client_sock, "ERROR: Failed to open tar file", 30);
         return -1;
     }
     
-    // Send file size
+    // Send the tar file size to the client
     write(client_sock, &st.st_size, sizeof(off_t));
     
-    // Send file data
+    // Send the tar file data to the client
     off_t remaining = st.st_size;
     while (remaining > 0) {
         ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
@@ -287,8 +298,8 @@ int download_tar(int client_sock) {
     }
     close(fd);
     
-    // Clean up
-    unlink("/tmp/pdfiles.tar");
+    // Clean up the tar file
+    unlink("/tmp/pdffiles.tar");
     
     return 0;
 }

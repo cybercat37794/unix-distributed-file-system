@@ -184,43 +184,67 @@ int upload_file(int client_sock, char *filename, char *dest_path) {
 }
 
 int download_file(int client_sock, char *filename) {
-    // Check if file exists in S4
+    // Validate filename
+    if (strstr(filename, "..") != NULL || strstr(filename, "/") != NULL) {
+        write(client_sock, "ERROR: Invalid file name", 24);
+        return -1;
+    }
+
+    // Ensure filename contains only valid characters
+    for (char *p = filename; *p; p++) {
+        if (!isalnum(*p) && *p != '.' && *p != '_' && *p != '-') {
+            write(client_sock, "ERROR: Invalid characters in filename", 37);
+            return -1;
+        }
+    }
+
+    // Construct the full path
     char s4_path[MAX_PATH_LEN];
     snprintf(s4_path, MAX_PATH_LEN, "%s/S4%s", getenv("HOME"), filename + 3); // +3 to skip "~S1"
-    
+
     struct stat st;
     if (stat(s4_path, &st) != 0) {
         write(client_sock, "ERROR: ZIP file not found in S4", 30);
         return -1;
     }
-    
+
     // Check if it's really a ZIP file
     char *ext = strrchr(s4_path, '.');
     if (ext == NULL || strcmp(ext, ".zip") != 0) {
         write(client_sock, "ERROR: Not a ZIP file", 21);
         return -1;
     }
-    
+
     // Open file
     int fd = open(s4_path, O_RDONLY);
     if (fd < 0) {
         write(client_sock, "ERROR: Failed to open ZIP file", 29);
         return -1;
     }
-    
+
     // Send file size
-    write(client_sock, &st.st_size, sizeof(off_t));
-    
+    if (write(client_sock, &st.st_size, sizeof(off_t)) != sizeof(off_t)) {
+        close(fd);
+        write(client_sock, "ERROR: Failed to send file size", 31);
+        return -1;
+    }
+
     // Send file data
     off_t remaining = st.st_size;
+    char buffer[BUFFER_SIZE];
     while (remaining > 0) {
-        ssize_t sent = sendfile(client_sock, fd, NULL, remaining);
-        if (sent <= 0) {
+        ssize_t n = read(fd, buffer, (remaining < BUFFER_SIZE) ? remaining : BUFFER_SIZE);
+        if (n <= 0) {
             close(fd);
             write(client_sock, "ERROR: File transfer failed", 27);
             return -1;
         }
-        remaining -= sent;
+        if (write(client_sock, buffer, n) != n) {
+            close(fd);
+            write(client_sock, "ERROR: File transfer failed", 27);
+            return -1;
+        }
+        remaining -= n;
     }
     close(fd);
     return 0;
